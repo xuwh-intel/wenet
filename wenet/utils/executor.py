@@ -20,6 +20,8 @@ from contextlib import nullcontext
 import torch
 from torch.nn.utils import clip_grad_norm_
 
+import habana_frameworks.torch.core as htcore
+
 
 class Executor:
 
@@ -80,11 +82,8 @@ class Executor:
                     context = nullcontext
                 with context():
                     if is_deepspeed:  # deepspeed
-                        with torch.cuda.amp.autocast(
-                            enabled=ds_dtype is not None,
-                            dtype=ds_dtype, cache_enabled=False
-                        ):
-                            loss_dict = model(feats, feats_lengths, target,
+                        # with torch.autocast(enabled=False):
+                        loss_dict = model(feats, feats_lengths, target,
                                               target_lengths)
                         loss = loss_dict['loss']
                         # NOTE(xcsong): Zeroing the gradients is handled automatically by DeepSpeed after the weights # noqa
@@ -93,18 +92,20 @@ class Executor:
                         #   `model.backward(loss)` is equivalent to `loss.backward() + clip_grad_norm_() + optimizer.zero_grad() + accum_grad` # noqa
                         #   ref: https://www.deepspeed.ai/tutorials/megatron/#using-the-training-api  # noqa
                         model.backward(loss)
+                        htcore.mark_step()
                     else:             # pytorch native ddp
                         # autocast context
                         # The more details about amp can be found in
                         # https://pytorch.org/docs/stable/notes/amp_examples.html
-                        with torch.cuda.amp.autocast(scaler is not None):
-                            loss_dict = model(feats, feats_lengths, target,
-                                              target_lengths)
-                            loss = loss_dict['loss'] / accum_grad
+                        # with torch.autocast(enabled=False):
+                        loss_dict = model(feats, feats_lengths, target,
+                                            target_lengths)
+                        loss = loss_dict['loss'] / accum_grad
                         if use_amp:
                             scaler.scale(loss).backward()
                         else:
                             loss.backward()
+                        htcore.mark_step()
 
                 num_seen_utts += num_utts
                 if is_deepspeed:
@@ -115,6 +116,7 @@ class Executor:
                     #   no need to manually perform scheduler.step(). In other words: `ds_model.step() = optimizer.step() + scheduler.step()` # noqa
                     #   ref: https://www.deepspeed.ai/tutorials/megatron/#using-the-training-api  # noqa
                     model.step()
+                    htcore.mark_step()
                     self.step += 1
                 elif not is_deepspeed and batch_idx % accum_grad == 0:
                     if rank == 0 and writer is not None:
@@ -138,6 +140,7 @@ class Executor:
                             optimizer.step()
                     optimizer.zero_grad()
                     scheduler.step()
+                    htcore.mark_step()
                     self.step += 1
                 if batch_idx % log_interval == 0:
                     lr = optimizer.param_groups[0]['lr']
@@ -179,10 +182,7 @@ class Executor:
                 if num_utts == 0:
                     continue
                 if is_deepspeed:
-                    with torch.cuda.amp.autocast(
-                        enabled=ds_dtype is not None,
-                        dtype=ds_dtype, cache_enabled=False
-                    ):
+                    # with torch.autocast(enabled=False):
                         loss_dict = model(feats, feats_lengths,
                                           target, target_lengths)
                 else:
@@ -201,4 +201,5 @@ class Executor:
                                                             num_seen_utts)
                     log_str += ' rank {}'.format(rank)
                     logging.debug(log_str)
+                htcore.mark_step()
         return total_loss, num_seen_utts

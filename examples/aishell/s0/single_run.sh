@@ -3,27 +3,12 @@
 # Copyright 2019 Mobvoi Inc. All Rights Reserved.
 . ./path.sh || exit 1;
 
-# Use this to control how many gpu you use, It's 1-gpu training if you specify
-# just 1gpu, otherwise it's is multiple gpu training based on DDP in pytorch
-CUDA_VISIBLE_DEVICES="0"
+stage=4 # start from 0 if you need to start from data preparation
+stop_stage=4
 
-stage=0 # start from 0 if you need to start from data preparation
-stop_stage=5
-
-# You should change the following two parameters for multiple machine training,
-# see https://pytorch.org/docs/stable/elastic/run.html
-HOST_NODE_ADDR="localhost:0"
-num_nodes=1
-
-# export PT_HPU_LAZY_MODE=0
-export ENABLE_CONSOLE=1
-
-# The aishell dataset location, please change this to your own path
-# make sure of using absolute path. DO-NOT-USE relatvie path!
-data=/devops/datasets/asr-data/OpenSLR/33/
+data=/home/wenhaoxu/dataset/asr-data/OpenSLR/33/
 data_url=www.openslr.org/resources/33
 
-nj=16
 dict=data/dict/lang_char.txt
 
 # data_type can be `raw` or `shard`. Typically, raw is used for small dataset,
@@ -53,65 +38,7 @@ decode_checkpoint=$dir/final.pt
 average_num=30
 decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_rescoring"
 
-deepspeed=false
-deepspeed_config=conf/ds_stage2.json
-deepspeed_save_states="model_only"
-
 . tools/parse_options.sh || exit 1;
-
-if [ ${stage} -le -1 ] && [ ${stop_stage} -ge -1 ]; then
-  echo "stage -1: Data Download"
-  local/download_and_untar.sh ${data} ${data_url} data_aishell
-  local/download_and_untar.sh ${data} ${data_url} resource_aishell
-fi
-
-if [ ${stage} -le 0 ] && [ ${stop_stage} -ge 0 ]; then
-  # Data preparation
-  local/aishell_data_prep.sh ${data}/data_aishell/wav \
-    ${data}/data_aishell/transcript
-fi
-
-
-if [ ${stage} -le 1 ] && [ ${stop_stage} -ge 1 ]; then
-  # remove the space between the text labels for Mandarin dataset
-  for x in train dev test; do
-    cp data/${x}/text data/${x}/text.org
-    paste -d " " <(cut -f 1 -d" " data/${x}/text.org) \
-      <(cut -f 2- -d" " data/${x}/text.org | tr -d " ") \
-      > data/${x}/text
-    rm data/${x}/text.org
-  done
-
-  tools/compute_cmvn_stats.py --num_workers 16 --train_config $train_config \
-    --in_scp data/${train_set}/wav.scp \
-    --out_cmvn data/$train_set/global_cmvn
-fi
-
-if [ ${stage} -le 2 ] && [ ${stop_stage} -ge 2 ]; then
-  echo "Make a dictionary"
-  mkdir -p $(dirname $dict)
-  echo "<blank> 0" > ${dict}  # 0 is for "blank" in CTC
-  echo "<unk> 1"  >> ${dict}  # <unk> must be 1
-  tools/text2token.py -s 1 -n 1 data/train/text | cut -f 2- -d" " \
-    | tr " " "\n" | sort | uniq | grep -a -v -e '^\s*$' | \
-    awk '{print $0 " " NR+1}' >> ${dict}
-  num_token=$(cat $dict | wc -l)
-  echo "<sos/eos> $num_token" >> $dict
-fi
-
-if [ ${stage} -le 3 ] && [ ${stop_stage} -ge 3 ]; then
-  echo "Prepare data, prepare required format"
-  for x in dev test ${train_set}; do
-    if [ $data_type == "shard" ]; then
-      tools/make_shard_list.py --num_utts_per_shard $num_utts_per_shard \
-        --num_threads 16 data/$x/wav.scp data/$x/text \
-        $(realpath data/$x/shards) data/$x/data.list
-    else
-      tools/make_raw_list.py data/$x/wav.scp data/$x/text \
-        data/$x/data.list
-    fi
-  done
-fi
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
   mkdir -p $dir
@@ -119,11 +46,7 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
   # multi-machine training.
   INIT_FILE=$dir/ddp_init
   rm -f ${INIT_FILE}  # remove previous INIT_FILE
-  init_method=file://$(readlink -f $INIT_FILE)
   echo "$0: init method is $init_method"
-  num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
-  # Use "hccl" if it works, otherwise use "gloo"
-  dist_backend="hccl"
   cmvn_opts=
   $cmvn && cp data/${train_set}/global_cmvn $dir
   $cmvn && cmvn_opts="--cmvn ${dir}/global_cmvn"
@@ -131,50 +54,21 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
   # train.py rewrite $train_config to $dir/train.yaml with model input
   # and output dimension, and $dir/train.yaml will be used for inference
   # and export.
-  if [ ${deepspeed} == true ]; then
-    echo "using deepspeed"
-    # NOTE(xcsong): deepspeed fails with gloo, see
-    #   https://github.com/microsoft/DeepSpeed/issues/2818
-    dist_backend="hccl"
-    [ ! -f data/$train_set/data.list.filter ] && \
-      python tools/filter_uneven_data.py data/$train_set/data.list \
-        $data_type $num_gpus $num_utts_per_shard data/$train_set/data.list.filter
-    deepspeed --include localhost:$CUDA_VISIBLE_DEVICES \
-      wenet/bin/train.py \
-        --deepspeed \
-        --deepspeed_config ${deepspeed_config} \
-        --deepspeed.save_states ${deepspeed_save_states} \
-        --ddp.dist_backend $dist_backend \
-        --ddp.init_method $init_method \
-        --data_type  $data_type \
-        --config $train_config \
-        --symbol_table  data/dict/lang_char.txt \
-        --train_data data/$train_set/data.list.filter \
-        --cv_data data/dev/data.list \
-        ${checkpoint:+--checkpoint $checkpoint} \
-        --model_dir $dir \
-        --num_workers ${num_workers} \
-        --prefetch ${prefetch} \
-        $cmvn_opts \
-        --pin_memory
-  else
-    echo "using torch ddp"
-    torchrun --nnodes=$num_nodes --nproc_per_node=$num_gpus --rdzv_endpoint=$HOST_NODE_ADDR \
-      wenet/bin/train.py \
-        --config $train_config \
-        --data_type $data_type \
-        --symbol_table $dict \
-        --train_data data/$train_set/data.list \
-        --cv_data data/dev/data.list \
-        ${checkpoint:+--checkpoint $checkpoint} \
-        --model_dir $dir \
-        --ddp.init_method $init_method \
-        --ddp.dist_backend $dist_backend \
-        --num_workers ${num_workers} \
-        --prefetch ${prefetch} \
-        $cmvn_opts \
-        --pin_memory
-  fi
+
+  echo "single card training"
+  python \
+    wenet/bin/train.py \
+      --config $train_config \
+      --data_type $data_type \
+      --symbol_table $dict \
+      --train_data data/$train_set/data.list \
+      --cv_data data/dev/data.list \
+      ${checkpoint:+--checkpoint $checkpoint} \
+      --model_dir $dir \
+      --num_workers ${num_workers} \
+      --prefetch ${prefetch} \
+      $cmvn_opts \
+      --pin_memory
 fi
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
@@ -320,3 +214,4 @@ if [ ${stage} -le 9 ] && [ ${stop_stage} -ge 9 ]; then
 
   # 9.3 Run HLG decode from stage 8.2
 fi
+

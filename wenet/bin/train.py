@@ -42,6 +42,9 @@ from wenet.utils.scheduler import WarmupLR, NoamHoldAnnealing
 from wenet.utils.config import override_config
 from wenet.utils.init_model import init_model
 
+import habana_frameworks.torch.gpu_migration
+import habana_frameworks.torch.core as htcore
+
 def get_args():
     parser = argparse.ArgumentParser(description='training your network')
     parser.add_argument('--config', required=True, help='config file')
@@ -58,8 +61,8 @@ def get_args():
                         help='tensorboard log dir')
     parser.add_argument('--ddp.dist_backend',
                         dest='dist_backend',
-                        default='nccl',
-                        choices=['nccl', 'gloo'],
+                        default='hccl',
+                        choices=['hccl', 'nccl', 'gloo'],
                         help='distributed backend')
     parser.add_argument('--ddp.init_method',
                         dest='init_method',
@@ -157,7 +160,7 @@ def main():
     distributed = world_size > 1
     if distributed:
         logging.info('training on multiple gpus, this gpu {}'.format(local_rank))
-        torch.cuda.set_device(local_rank)
+        torch.hpu.set_device(local_rank)
         dist.init_process_group(args.dist_backend,
                                 init_method=args.init_method,
                                 world_size=world_size,
@@ -256,9 +259,9 @@ def main():
     # !!!IMPORTANT!!!
     # Try to export the model by script, if fails, we should refine
     # the code to satisfy the script export requirements
-    if rank == 0:
-        script_model = torch.jit.script(model)
-        script_model.save(os.path.join(args.model_dir, 'init.zip'))
+    # if rank == 0:
+    #     script_model = torch.jit.script(model)
+    #     script_model.save(os.path.join(args.model_dir, 'init.zip'))
     executor = Executor()
     # If specify checkpoint, load some info from checkpoint
     if args.checkpoint is not None:
@@ -281,12 +284,12 @@ def main():
         writer = SummaryWriter(os.path.join(args.tensorboard_dir, exp_id))
 
     if distributed:  # native pytorch ddp
-        assert (torch.cuda.is_available())
-        # cuda model is required for nn.parallel.DistributedDataParallel
-        model.cuda()
+        assert (torch.hpu.is_available())
+        # hpu model is required for nn.parallel.DistributedDataParallel
+        model = model.to("hpu")
         model = torch.nn.parallel.DistributedDataParallel(
             model, find_unused_parameters=True)
-        device = torch.device("cuda")
+        device = torch.device("hpu")
         if args.fp16_grad_sync:
             from torch.distributed.algorithms.ddp_comm_hooks import (
                 default as comm_hooks,
@@ -307,8 +310,8 @@ def main():
         device = None     # Init device later
         pass              # Init DeepSpeed later
     else:
-        use_cuda = torch.cuda.is_available()
-        device = torch.device('cuda' if use_cuda else 'cpu')
+        use_hpu = torch.hpu.is_available()
+        device = torch.device('hpu' if use_hpu else 'cpu')
         model = model.to(device)
 
     if configs['optim'] == 'adam':
@@ -370,8 +373,8 @@ def main():
     scheduler.set_step(step)
     # used for pytorch amp mixed precision training
     scaler = None
-    if args.use_amp:
-        scaler = torch.cuda.amp.GradScaler()
+    # if args.use_amp:
+    #     scaler = torch.cuda.amp.GradScaler()
 
     for epoch in range(start_epoch, num_epochs):
         train_dataset.set_epoch(epoch)
