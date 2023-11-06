@@ -643,3 +643,20 @@ def padding(data):
 
         yield (sorted_keys, padded_feats, padding_labels, feats_lengths,
                label_lengths)
+
+
+def padding_to_fixed_length(data, feats_length=1024, target_length=32):
+    for sample in data:
+        feats = sample["feat"]
+        target = sample["label"]
+        # target = torch.tensor(target)
+        if feats.size(0) > feats_length or len(target) > target_length:
+            continue
+        pad_feats_shape = (feats_length - feats.size(0), feats.size(1))
+        pad_feats = torch.zeros(pad_feats_shape)
+        pad_target = [-1] * (target_length - len(target))
+        feats = torch.cat((feats, pad_feats), dim=0)
+        target += pad_target
+        sample["feat"] = feats
+        sample["label"] = target
+        yield sample

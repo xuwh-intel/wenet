@@ -127,7 +127,9 @@ class ConvolutionModule(nn.Module):
 
         # GLU mechanism
         x = self.pointwise_conv1(x)  # (batch, 2*channel, dim)
-        x = nn.functional.glu(x, dim=1)  # (batch, channel, dim)
+        # x = nn.functional.glu(x, dim=1)  # (batch, channel, dim)
+        x1, x2 = torch.split(x, x.shape[1] // 2, dim=1)
+        x = x1 * torch.nn.functional.sigmoid(x2)
 
         # 1D Depthwise Conv
         x = self.depthwise_conv(x)

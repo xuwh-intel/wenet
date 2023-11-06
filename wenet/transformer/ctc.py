@@ -55,7 +55,7 @@ class CTC(torch.nn.Module):
         ys_hat = self.ctc_lo(F.dropout(hs_pad, p=self.dropout_rate))
         # ys_hat: (B, L, D) -> (L, B, D)
         ys_hat = ys_hat.transpose(0, 1)
-        ys_hat = ys_hat.log_softmax(2)
+        ys_hat = ys_hat.log_softmax(2).to(torch.float)
         loss = self.ctc_loss(ys_hat, ys_pad, hlens, ys_lens)
         # Batch-size average
         loss = loss / ys_hat.size(1)

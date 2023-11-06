@@ -27,7 +27,7 @@ from wenet.transformer.search import (ctc_greedy_search,
                                       attention_rescoring, DecodeResult)
 from wenet.utils.common import (IGNORE_ID, add_sos_eos, th_accuracy,
                                 reverse_pad_list)
-
+import habana_frameworks.torch.core as htcore
 
 class ASRModel(torch.nn.Module):
     """CTC-attention hybrid Encoder-Decoder model"""

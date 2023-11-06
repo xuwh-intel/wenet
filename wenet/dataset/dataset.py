@@ -188,6 +188,7 @@ def Dataset(data_type,
         dataset = Processor(dataset, processor.sort, **sort_conf)
 
     batch_conf = conf.get('batch_conf', {})
+    dataset = Processor(dataset, processor.padding_to_fixed_length)
     dataset = Processor(dataset, processor.batch, **batch_conf)
     dataset = Processor(dataset, processor.padding)
     return dataset

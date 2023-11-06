@@ -5,7 +5,7 @@
 
 # Use this to control how many gpu you use, It's 1-gpu training if you specify
 # just 1gpu, otherwise it's is multiple gpu training based on DDP in pytorch
-export CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
 
 stage=0 # start from 0 if you need to start from data preparation
 stop_stage=5
@@ -15,9 +15,11 @@ stop_stage=5
 HOST_NODE_ADDR="localhost:0"
 num_nodes=1
 
+# export ENABLE_CONSOLE=1
+
 # The aishell dataset location, please change this to your own path
 # make sure of using absolute path. DO-NOT-USE relatvie path!
-data=/export/data/asr-data/OpenSLR/33/
+data=/devops/wenhaoxu/datasets/asr-data/OpenSLR/33/
 data_url=www.openslr.org/resources/33
 
 nj=16
@@ -119,8 +121,8 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
   init_method=file://$(readlink -f $INIT_FILE)
   echo "$0: init method is $init_method"
   num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
-  # Use "nccl" if it works, otherwise use "gloo"
-  dist_backend="nccl"
+  # Use "hccl" if it works, otherwise use "gloo"
+  dist_backend="hccl"
   cmvn_opts=
   $cmvn && cp data/${train_set}/global_cmvn $dir
   $cmvn && cmvn_opts="--cmvn ${dir}/global_cmvn"
@@ -132,7 +134,7 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
     echo "using deepspeed"
     # NOTE(xcsong): deepspeed fails with gloo, see
     #   https://github.com/microsoft/DeepSpeed/issues/2818
-    dist_backend="nccl"
+    dist_backend="hccl"
     [ ! -f data/$train_set/data.list.filter ] && \
       python tools/filter_uneven_data.py data/$train_set/data.list \
         $data_type $num_gpus $num_utts_per_shard data/$train_set/data.list.filter
@@ -156,7 +158,7 @@ if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
         --pin_memory
   else
     echo "using torch ddp"
-    torchrun --nnodes=$num_nodes --nproc_per_node=$num_gpus --rdzv_endpoint=$HOST_NODE_ADDR \
+    torchrun --nnodes=$num_nodes --nproc_per_node=$num_gpus \
       wenet/bin/train.py \
         --config $train_config \
         --data_type $data_type \
