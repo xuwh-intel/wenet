@@ -10,6 +10,7 @@
 stage=5 # start from 0 if you need to start from data preparation
 stop_stage=5
 
+# export ENABLE_CONSOLE=1
 
 # The aishell dataset location, please change this to your own path
 # make sure of using absolute path. DO-NOT-USE relatvie path!
@@ -36,7 +37,7 @@ train_config=conf/train_conformer.yaml
 cmvn=true
 dir=exp/conformer
 checkpoint=
-num_workers=8
+num_workers=1
 prefetch=500
 
 # use average_checkpoint will get better result
@@ -48,7 +49,7 @@ decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_resco
 
 if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
   dir=exp/wenet_efficient_conformer_aishell_v2
-  decode_modes="ctc_greedy_search attention_rescoring"
+  decode_modes="ctc_greedy_search"
   ctc_weight=0.5
   reverse_weight=0.3
   decoding_chunk_size=-1
@@ -65,7 +66,7 @@ if [ ${stage} -le 5 ] && [ ${stop_stage} -ge 5 ]; then
     --ctc_weight $ctc_weight \
     --reverse_weight $reverse_weight \
     --result_dir $dir \
-    ${decoding_chunk_size:+--decoding_chunk_size $decoding_chunk_size} > logs/decode_aishell.log
+    ${decoding_chunk_size:+--decoding_chunk_size $decoding_chunk_size}
   for mode in ${decode_modes}; do
     python tools/compute-cer.py --char=1 --v=1 \
       data/test/text $dir/${mode}/text > $dir/${mode}/cer.txt

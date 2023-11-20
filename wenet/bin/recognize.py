@@ -22,6 +22,7 @@ import os
 import torch
 import yaml
 from torch.utils.data import DataLoader
+import habana_frameworks.torch.core as htcore
 
 from wenet.dataset.dataset import Dataset
 from wenet.utils.checkpoint import load_checkpoint
@@ -180,7 +181,7 @@ def main():
     args = get_args()
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    # os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
     with open(args.config, 'r') as fin:
         configs = yaml.load(fin, Loader=yaml.FullLoader)
@@ -227,15 +228,17 @@ def main():
     char_dict = {v: k for k, v in symbol_table.items()}
 
     load_checkpoint(model, args.checkpoint)
-    use_cuda = args.gpu >= 0 and torch.cuda.is_available()
-    device = torch.device('cuda' if use_cuda else 'cpu')
+    use_hpu = args.gpu >= 0 and torch.hpu.is_available()
+    device = torch.device('hpu' if use_hpu else 'cpu')
     model = model.to(device)
     model.eval()
+    import habana_frameworks.torch as ht
+    ht.hpu.ModuleCacher()(model=model, inplace=True, allow_unused_input=True)
 
-    context_graph = None
-    if 'decoding-graph' in args.context_bias_mode:
-        context_graph = ContextGraph(args.context_list_path, symbol_table,
-                                     args.bpe_model, args.context_graph_score)
+    # context_graph = None
+    # if 'decoding-graph' in args.context_bias_mode:
+    #     context_graph = ContextGraph(args.context_list_path, symbol_table,
+    #                                  args.bpe_model, args.context_graph_score)
 
     # TODO(Dinghao Zhou): Support RNN-T related decoding
     # TODO(Lv Xiang): Support k2 related decoding
@@ -264,6 +267,7 @@ def main():
                 ctc_weight=args.ctc_weight,
                 simulate_streaming=args.simulate_streaming,
                 reverse_weight=args.reverse_weight)
+            htcore.mark_step()
             for i, key in enumerate(keys):
                 for mode, hyps in results.items():
                     content = [char_dict[w] for w in hyps[i].tokens]
