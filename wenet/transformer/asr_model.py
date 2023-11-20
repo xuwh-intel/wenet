@@ -144,7 +144,7 @@ class ASRModel(torch.nn.Module):
                                                      self.reverse_weight)
         # 2. Compute attention loss
         loss_att = self.criterion_att(decoder_out, ys_out_pad)
-        r_loss_att = torch.tensor(0.0)
+        r_loss_att = torch.tensor(0.0).requires_grad_()
         if self.reverse_weight > 0.0:
             r_loss_att = self.criterion_att(r_decoder_out, r_ys_out_pad)
         loss_att = loss_att * (

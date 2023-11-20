@@ -646,17 +646,42 @@ def padding(data):
 
 
 def padding_to_fixed_length(data, feats_length=1024, target_length=32):
+    """ Padding the data into fixed length
+
+        Args:
+            data: Iterable[Tuple(keys, feats, labels, feats lengths, label lengths)]
+
+        Returns:
+            Iterable[Tuple(keys, feats, labels, feats lengths, label lengths)]
+    """
     for sample in data:
-        feats = sample["feat"]
-        target = sample["label"]
-        # target = torch.tensor(target)
-        if feats.size(0) > feats_length or len(target) > target_length:
+        assert isinstance(sample, tuple)
+        sample = list(sample)
+        feats = sample[1]
+        target = sample[2]
+        if feats.size(1) > feats_length or target.size(1) > target_length:
             continue
-        pad_feats_shape = (feats_length - feats.size(0), feats.size(1))
-        pad_feats = torch.zeros(pad_feats_shape)
-        pad_target = [-1] * (target_length - len(target))
-        feats = torch.cat((feats, pad_feats), dim=0)
-        target += pad_target
-        sample["feat"] = feats
-        sample["label"] = target
-        yield sample
+        pad_feats_shape = (feats.size(0), feats_length - feats.size(1), feats.size(2))
+        pad_feats = torch.zeros(pad_feats_shape, dtype=feats.dtype)
+        pad_target = -1 * torch.ones([target.size(0), target_length - target.size(1)], dtype=target.dtype)
+        feats = torch.cat((feats, pad_feats), dim=1)
+        target = torch.cat((target, pad_target), dim=1)
+        sample[1] = feats
+        sample[2] = target
+        yield tuple(sample)
+
+# def padding_to_fixed_length(data, feats_length=1024, target_length=32):
+#     for sample in data:
+#         feats = sample["feat"]
+#         target = sample["label"]
+#         # target = torch.tensor(target)
+#         if feats.size(0) > feats_length or len(target) > target_length:
+#             continue
+#         pad_feats_shape = (feats_length - feats.size(0), feats.size(1))
+#         pad_feats = torch.zeros(pad_feats_shape)
+#         pad_target = [-1] * (target_length - len(target))
+#         feats = torch.cat((feats, pad_feats), dim=0)
+#         target += pad_target
+#         sample["feat"] = feats
+#         sample["label"] = target
+#         yield sample

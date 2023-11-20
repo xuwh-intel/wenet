@@ -3,16 +3,12 @@
 # Copyright 2019 Mobvoi Inc. All Rights Reserved.
 . ./path.sh || exit 1;
 
-# Use this to control how many gpu you use, It's 1-gpu training if you specify
-# just 1gpu, otherwise it's is multiple gpu training based on DDP in pytorch
-CUDA_VISIBLE_DEVICES="0"
-
 stage=4 # start from 0 if you need to start from data preparation
 stop_stage=4
 
 
 # export ENABLE_CONSOLE=1
-export GRAPH_VISUALIZATION=1
+# export GRAPH_VISUALIZATION=1
 
 # The aishell dataset location, please change this to your own path
 # make sure of using absolute path. DO-NOT-USE relatvie path!
@@ -40,7 +36,7 @@ train_config=conf/train_conformer.yaml
 cmvn=true
 dir=exp/conformer
 checkpoint=
-num_workers=8
+num_workers=1
 prefetch=500
 
 # use average_checkpoint will get better result
@@ -52,14 +48,6 @@ decode_modes="ctc_greedy_search ctc_prefix_beam_search attention attention_resco
 
 if [ ${stage} -le 4 ] && [ ${stop_stage} -ge 4 ]; then
   mkdir -p $dir
-  # You have to rm `INIT_FILE` manually when you resume or restart a
-  # multi-machine training.
-  INIT_FILE=$dir/ddp_init
-  rm -f ${INIT_FILE}  # remove previous INIT_FILE
-  init_method=file://$(readlink -f $INIT_FILE)
-  num_gpus=$(echo $CUDA_VISIBLE_DEVICES | awk -F "," '{print NF}')
-  # Use "hccl" if it works, otherwise use "gloo"
-  dist_backend="hccl"
   cmvn_opts=
   $cmvn && cp data/${train_set}/global_cmvn $dir
   $cmvn && cmvn_opts="--cmvn ${dir}/global_cmvn"

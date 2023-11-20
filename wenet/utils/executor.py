@@ -71,7 +71,7 @@ class Executor:
             model_context = nullcontext
 
         # import habana_frameworks.torch as ht
-        # ht.hpu.ModuleCacher()(model=model, inplace=True)
+        # ht.hpu.ModuleCacher()(model=model, inplace=True, allow_unused_input=True)
         self.hb_profiler.start()
 
         num_seen_utts = 0
@@ -112,19 +112,15 @@ class Executor:
                         # The more details about amp can be found in
                         # https://pytorch.org/docs/stable/notes/amp_examples.html
                         t1 = time.time()
-                        with torch.autocast(device_type="hpu", dtype=torch.bfloat16, enabled=True):
+                        with torch.autocast(device_type="hpu", dtype=torch.bfloat16, enabled=False):
                             loss_dict = model(feats, feats_lengths, target,
                                               target_lengths)
                             loss = loss_dict['loss'] / accum_grad
                         if use_amp:
                             scaler.scale(loss).backward()
                         else:
-                            # torch.hpu.synchronize()
                             loss.backward()
-                            # torch.hpu.synchronize()
-                            # sys.exit()
-                        # print("time is ", time.time() - t1)
-                    htcore.mark_step()
+                htcore.mark_step()
 
                 num_seen_utts += num_utts
                 if is_deepspeed:
